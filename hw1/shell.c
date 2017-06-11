@@ -27,8 +27,28 @@ struct termios shell_tmodes;
 /* Process group id for the shell */
 pid_t shell_pgid;
 
+/*getcwd - get the pathname of the current working directory*/
+char *getcwd(char *buf, size_t size);
+
+/* chdir, fchdir - change working directory*/
+/*
+
+ chdir() changes the current working directory of the calling process
+ 	to the directory specified in path.
+ fchdir() is identical to chdir(); the only difference is that the
+ 	directory is given as an open file descriptor.
+*/
+int chdir(const char *path);
+int fchdir(int fd);
+
+
+
 int cmd_exit(struct tokens *tokens);
 int cmd_help(struct tokens *tokens);
+int cmd_cd(struct tokens *tokens);
+int cmd_pwd(struct tokens *tokens);
+
+
 
 /* Built-in command functions take token array (see parse.h) and return int */
 typedef int cmd_fun_t(struct tokens *tokens);
@@ -43,6 +63,8 @@ typedef struct fun_desc {
 fun_desc_t cmd_table[] = {
   {cmd_help, "?", "show this help menu"},
   {cmd_exit, "exit", "exit the command shell"},
+  {cmd_cd, "cd", "takes one argument, a directory path, and changes the current working directory to that directory"},
+  {cmd_pwd, "pwd", " prints the current working directory to standard output."}
 };
 
 /* Prints a helpful description for the given command */
@@ -56,6 +78,38 @@ int cmd_help(unused struct tokens *tokens) {
 int cmd_exit(unused struct tokens *tokens) {
   exit(0);
 }
+
+/* Changes directory to PATH*/
+int cmd_cd(unused struct tokens *tokens) {
+   if( tokens_get_length(tokens) != 2 ) {
+        fprintf( stderr, "Use: cd <directory>\n" );
+        return EXIT_FAILURE;
+    }
+
+    if( chdir( tokens_get_token(tokens, 1) ) == 0 ) {
+        printf( "Directory changed to %s\n",  tokens_get_token(tokens, 1) );
+        return EXIT_SUCCESS;
+    } else {
+        perror(  tokens_get_token(tokens, 1));
+        return EXIT_FAILURE;
+    }
+}
+
+/* Prints current working directory*/
+int cmd_pwd(unused struct tokens *tokens) {
+  char cwd[1024];
+   if (getcwd(cwd, sizeof(cwd)) != NULL)
+       fprintf(stdout, "Current working dir: %s\n", cwd);
+   else
+       perror("getcwd() error");
+   return 0;
+  	
+}
+
+
+
+
+
 
 /* Looks up the built-in command, if it exists. */
 int lookup(char cmd[]) {
