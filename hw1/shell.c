@@ -207,9 +207,24 @@ int main(unused int argc, unused char *argv[]) {
 
 
       int ret;
-      char* name=tokens_get_token(tokens, 0);
-      char *cmd[] = { name, tokens_get_token(tokens, 1), (char *)0 };
-       if( index(name,'/') != 0) {
+     /* char* name=tokens_get_token(tokens, 0);*/
+     /* char *cmd[] = { name, tokens_get_token(tokens, 1), (char *)0 };*/
+      char* cmd[4096];
+      int c=0;
+      while(c< tokens_get_length(tokens)){
+         
+      if( strcmp(tokens_get_token(tokens, c),&io[0] )==0||strcmp(tokens_get_token(tokens, c),&io[1] )==0){
+        break;   /*if we found the string is '<' or '>', break*/
+         }
+      cmd[c]= tokens_get_token(tokens, c);
+           
+       
+      c++;
+}      
+      cmd[c+1]= (char*)0;     
+ 
+      char* name= cmd[0];
+      if( index(name,'/') != 0) {
 	/*
 	 * If the name specifies a path, don't search for it on the search path,
 	 * just try and execute it.
