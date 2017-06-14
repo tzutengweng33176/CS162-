@@ -9,11 +9,16 @@
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #include "tokenizer.h"
 
 /* Convenience macro to silence compiler warnings about unused function parameters. */
 #define unused __attribute__((unused))
+
+
+extern char **environ;
 
 /* Whether the shell is connected to an actual terminal or not. */
 bool shell_is_interactive;
@@ -39,8 +44,10 @@ char *getcwd(char *buf, size_t size);
  	directory is given as an open file descriptor.
 */
 int chdir(const char *path);
-int fchdir(int fd);
 
+/*execute a file*/
+int execl(const char *path, const char *arg, ...
+                       /* (char  *) NULL */);
 
 
 int cmd_exit(struct tokens *tokens);
@@ -106,11 +113,6 @@ int cmd_pwd(unused struct tokens *tokens) {
   	
 }
 
-
-
-
-
-
 /* Looks up the built-in command, if it exists. */
 int lookup(char cmd[]) {
   for (unsigned int i = 0; i < sizeof(cmd_table) / sizeof(fun_desc_t); i++)
@@ -166,7 +168,106 @@ int main(unused int argc, unused char *argv[]) {
       cmd_table[fundex].fun(tokens);
     } else {
       /* REPLACE this to run commands as programs. */
-      fprintf(stdout, "This shell doesn't know how to run programs.\n");
+      pid_t pid=fork();
+      if(pid==0){
+       char *path;
+       #define MAX_NAME_SIZE 1000
+       char fullName[MAX_NAME_SIZE+1];
+       register char *first, *last;
+       int nameLength, size, noAccess;
+
+       noAccess = 0;
+       int i=0;
+       char io[]={'<', '>' };
+       while(tokens_get_token(tokens, i)!=NULL){
+		if(strcmp(tokens_get_token(tokens, i),&io[0])==0 ){
+		int in = open(tokens_get_token(tokens, i+1),O_RDONLY);
+                /*printf("%s", "input\n");
+		process_ptr->stdin = in;*/
+		if(in < 0){
+			fprintf(stdin,"no %s file\n",tokens_get_token(tokens, i+1));
+			exit(EXIT_FAILURE);
+						}
+		dup2(in,0);
+		close(in);
+		/*t[i] = NULL;*/
+		break;
+		}
+	else if(strcmp(tokens_get_token(tokens, i), &io[1])==0){
+	int out = open(tokens_get_token(tokens, i+1),O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+        /* printf("%s", "output\n");*/
+
+	dup2(out,1);
+	close(out);
+	/*t[i] = NULL;*/
+	break;
+	}
+					i++;
+		}    
+
+
+      int ret;
+      char* name=tokens_get_token(tokens, 0);
+      char *cmd[] = { name, tokens_get_token(tokens, 1), (char *)0 };
+       if( index(name,'/') != 0) {
+	/*
+	 * If the name specifies a path, don't search for it on the search path,
+	 * just try and execute it.
+	 */
+          ret=execv(name,cmd );
+          return ret;    }
+     
+
+
+
+
+       path = getenv("PATH");
+    if (path == 0) {
+	path = "/sprite/cmds";
+    }
+    nameLength = strlen(name);
+    for (first = path; ; first = last+1) {
+
+	/*
+	 * Generate the next file name to try.
+	 */
+
+	for (last = first; (*last != 0) && (*last != ':'); last++) {
+	    /* Empty loop body. */
+	}
+	size = last-first;
+	if ((size + nameLength + 2) >= MAX_NAME_SIZE) {
+	    continue;
+	}
+	(void) strncpy(fullName, first, size);
+	if (last[-1] != '/') {
+	    fullName[size] = '/';
+	    size++;
+	}
+	(void) strcpy(fullName + size, name);
+
+	execv(fullName,cmd);
+	if (errno == EACCES) {
+	    noAccess = 1;
+	} else if (errno != ENOENT) {
+	    break;
+	}
+	if (*last == 0) {
+	    /*
+	     * Hit the end of the path. We're done.
+	     * If there existed a file by the right name along the search path,
+	     * but its permissions were wrong, return FS_NO_ACCESS. Else return
+	     * whatever we just got back.
+	     */
+	    if (noAccess) {
+		errno = EACCES;
+	    }
+	    break;
+	}
+    }
+    return -1; 
+}
+    /* fprintf(stdout, "This shell doesn't know how to run programs.\n");*/
     }
 
     if (shell_is_interactive)
