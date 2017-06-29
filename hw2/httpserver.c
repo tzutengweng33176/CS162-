@@ -18,6 +18,8 @@
 #include "libhttp.h"
 #include "wq.h"
 
+#define BUFF_SIZE 1024
+
 /*
  * Global configuration variables.
  * You need to use these in your implementation of handle_files_request and
@@ -43,6 +45,55 @@ int server_proxy_port;
  *      of files in the directory with links to each.
  *   4) Send a 404 Not Found response.
  */
+
+int is_File(char *path){
+	struct stat path_stat;
+	stat(path,&path_stat);
+	return S_ISREG(path_stat.st_mode);
+}
+
+int is_Directory(char *path){
+	struct stat path_stat;
+	stat(path,&path_stat);
+	return S_ISDIR(path_stat.st_mode);
+}
+
+void write_from_file_to_fd(int fd,char *file_path){
+	int file_des = open(file_path,O_RDONLY);
+	if(file_des == -1){
+			printf("fail to open file\n");
+	}
+
+     http_send_string(fd,
+      "<center>"
+      "<h1>Welcome to httpserver!</h1>"
+      "<hr>"
+      "<p>Nothing's here yet.</p>"
+      "</center>");
+
+	close(file_des);
+}
+
+int read_from_target_write_to_client(int target_fd,int client_fd){
+	char buffer[BUFF_SIZE];
+	int nbytes;
+	nbytes = read(target_fd,buffer,BUFF_SIZE);
+	printf("reveived %d bytes.\n",nbytes);
+	printf("%s",buffer);
+	if(nbytes < 0){
+		perror("read");
+		exit(EXIT_FAILURE);
+	}
+	else if (nbytes == 0){
+		return -1;
+	}
+	else{
+		http_send_string(client_fd,buffer);
+		return 0;
+	}
+}
+
+
 void handle_files_request(int fd) {
 
   /*
@@ -53,14 +104,28 @@ void handle_files_request(int fd) {
   struct http_request *request = http_request_parse(fd);
 
   http_start_response(fd, 200);
-  http_send_header(fd, "Content-Type", "text/html");
-  http_end_headers(fd);
-  http_send_string(fd,
-      "<center>"
-      "<h1>Welcome to httpserver!</h1>"
-      "<hr>"
-      "<p>Nothing's here yet.</p>"
-      "</center>");
+  
+ char* file_path= strcat(server_files_directory, request->path); //concatenate path to server_files_directory
+  printf("File path is %s\n", file_path);
+
+  
+ if(is_Directory(file_path)){   
+    http_send_header(fd, "Content-Type", "text/html");
+    http_end_headers(fd);
+ // how do I know whether index.html file exists in the directory?
+    file_path = strcat(file_path,"/index.html"); 
+    write_from_file_to_fd(fd,file_path);
+
+
+}   else if(is_File(file_path)){
+  	http_send_header(fd, "Content-type", http_get_mime_type(request->path));
+  	http_end_headers(fd);
+		write_from_file_to_fd(fd,file_path);
+}else{  
+    http_start_response(fd, 404);
+     
+}
+
 }
 
 
@@ -82,10 +147,22 @@ void handle_proxy_request(int fd) {
   * opens a connection to it. Please do not modify.
   */
 
+// struct sockaddr_in {
+//               sa_family_t    sin_family; /* address family: AF_INET */
+//               in_port_t      sin_port;   /* port in network byte order */
+//               struct in_addr sin_addr;   /* internet address */
+ //          };
+
+           /* Internet address. */
+//           struct in_addr {
+//               uint32_t       s_addr;     /* address in network byte order *///          };
+
   struct sockaddr_in target_address;
   memset(&target_address, 0, sizeof(target_address));
   target_address.sin_family = AF_INET;
   target_address.sin_port = htons(server_proxy_port);
+//The htons() function converts the unsigned short integer hostshort from host byte order to network byte order.
+
 
   struct hostent *target_dns_entry = gethostbyname2(server_proxy_hostname, AF_INET);
 
@@ -105,6 +182,7 @@ void handle_proxy_request(int fd) {
   memcpy(&target_address.sin_addr, dns_address, sizeof(target_address.sin_addr));
   int connection_status = connect(client_socket_fd, (struct sockaddr*) &target_address,
       sizeof(target_address));
+// connect() system call connects the socket referred to by the file descriptor client_socket_fd to the address specified by target_address. 
 
   if (connection_status < 0) {
     /* Dummy request parsing, just to be compliant. */
@@ -159,6 +237,7 @@ void serve_forever(int *socket_number, void (*request_handler)(int)) {
   server_address.sin_addr.s_addr = INADDR_ANY;
   server_address.sin_port = htons(server_port);
 
+//assigning a name to a socket
   if (bind(*socket_number, (struct sockaddr *) &server_address,
         sizeof(server_address)) == -1) {
     perror("Failed to bind on socket");
@@ -174,7 +253,7 @@ void serve_forever(int *socket_number, void (*request_handler)(int)) {
 
   init_thread_pool(num_threads, request_handler);
 
-  while (1) {
+  while (1) {//Wait a client to connect to the port
     client_socket_number = accept(*socket_number,
         (struct sockaddr *) &client_address,
         (socklen_t *) &client_address_length);
@@ -182,11 +261,12 @@ void serve_forever(int *socket_number, void (*request_handler)(int)) {
       perror("Error accepting socket");
       continue;
     }
+    //Accept the client and obtain a new connection socket
 
     printf("Accepted connection from %s on port %d\n",
         inet_ntoa(client_address.sin_addr),
         client_address.sin_port);
-
+     //Read in and parse the HTTP request
     // TODO: Change me?
     request_handler(client_socket_number);
     close(client_socket_number);
@@ -226,7 +306,7 @@ int main(int argc, char **argv) {
 
   int i;
   for (i = 1; i < argc; i++) {
-    if (strcmp("--files", argv[i]) == 0) {
+    if (strcmp("--files", argv[i]) == 0) {//file mode
       request_handler = handle_files_request;
       free(server_files_directory);
       server_files_directory = argv[++i];
@@ -234,7 +314,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Expected argument after --files\n");
         exit_with_usage();
       }
-    } else if (strcmp("--proxy", argv[i]) == 0) {
+    } else if (strcmp("--proxy", argv[i]) == 0) {//proxy mode
       request_handler = handle_proxy_request;
 
       char *proxy_target = argv[++i];
