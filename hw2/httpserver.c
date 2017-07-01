@@ -64,21 +64,19 @@ void write_from_file_to_fd(int fd,char *file_path){
 			printf("fail to open file\n");
 	}
 
-     http_send_string(fd,
-      "<center>"
-      "<h1>Welcome to httpserver!</h1>"
-      "<hr>"
-      "<p>Nothing's here yet.</p>"
-      "</center>");
 
-	close(file_des);
+        char buffer[1024];
+	while(read(file_des,buffer,sizeof(buffer)) != 0){
+		http_send_string(fd,buffer);
+	}
+        close(file_des);
 }
 
 int read_from_target_write_to_client(int target_fd,int client_fd){
 	char buffer[BUFF_SIZE];
 	int nbytes;
 	nbytes = read(target_fd,buffer,BUFF_SIZE);
-	printf("reveived %d bytes.\n",nbytes);
+	printf("received %d bytes.\n",nbytes);
 	printf("%s",buffer);
 	if(nbytes < 0){
 		perror("read");
@@ -102,27 +100,93 @@ void handle_files_request(int fd) {
    */
 
   struct http_request *request = http_request_parse(fd);
+//When you press the button, you're requesting my_documents, which is a directory that does not contain index.html, so we should return a list of files 
 
-  http_start_response(fd, 200);
   
  char* file_path= strcat(server_files_directory, request->path); //concatenate path to server_files_directory
   printf("File path is %s\n", file_path);
-
   
  if(is_Directory(file_path)){   
+     http_start_response(fd, 200);
     http_send_header(fd, "Content-Type", "text/html");
     http_end_headers(fd);
  // how do I know whether index.html file exists in the directory?
-    file_path = strcat(file_path,"/index.html"); 
-    write_from_file_to_fd(fd,file_path);
+    //list the files of the directory
+    DIR* dir=opendir(file_path);
+     //check if there is index.html
+    struct dirent *dp;
 
+    int a=0;
+    do {
+        if ((dp = readdir(dir)) != NULL) {
+	    if (strcmp(dp->d_name, "index.html") == 0){
+                (void) printf("found %s\n", "index.html");
+                (void) closedir(dir);
+                a=1;
+                file_path = strcat(file_path,"/index.html");
+                write_from_file_to_fd(fd,file_path);
+             }else{  //if index.html is not in the directory
+              if (strcmp(dp->d_name, ".") != 0 && strcmp(dp->d_name, "..")!=0 ){
+                  http_send_string(fd,"<a href=\"");
+                  http_send_string(fd,  dp->d_name);
+                  http_send_string(fd, "\">") ;
+                  http_send_string(fd,  dp->d_name);
+                  http_send_string(fd,"</a>""</br>");
+                }
+             }
+    }} while (dp != NULL);
+    if(a==0){
+     http_send_string(fd,"<a href=\"");
+     http_send_string(fd,file_path);
+     http_send_string(fd, "\">"); 
+     http_send_string(fd,"Parent directory");
+     http_send_string(fd, "</a>""</br>");
+}
 
 }   else if(is_File(file_path)){
-  	http_send_header(fd, "Content-type", http_get_mime_type(request->path));
+  	
+         http_start_response(fd, 200);
+        http_send_header(fd, "Content-type", http_get_mime_type(request->path));
   	http_end_headers(fd);
-		write_from_file_to_fd(fd,file_path);
+          http_send_string(fd,
+      "<center>"
+      "<h1>Welcome to httpserver!</h1>"
+      "<hr>");
+       char *file_extension = strrchr(file_path, '.');
+      if (strcmp(file_extension, ".jpg") == 0 || strcmp(file_extension, ".jpeg") == 0) {
+
+       http_send_string(fd, "<img src=");
+       http_send_string(fd,file_path);
+       http_send_string(fd,">");
+    
+     }else{
+      
+     http_send_string(fd,"<object data=\"");
+     http_send_string(fd,file_path);
+     http_send_string(fd, "\">" "type=\"text/plain\"");
+     http_send_string(fd,">");
+     http_send_string(fd, "</object>");
+
+     
+  }
+
+
+
+
+      
+      http_send_string(fd,"</center>");
+       
+       
 }else{  
     http_start_response(fd, 404);
+    http_send_header(fd, "Content-Type", "text/html");
+    http_end_headers(fd);
+     http_send_string(fd,
+      "<center>"
+      "<h1>404 Not Found</h1>"
+      "<hr>"
+      "<p>404 Not found</p>"
+      "</center>");
      
 }
 
@@ -218,7 +282,7 @@ void serve_forever(int *socket_number, void (*request_handler)(int)) {
   struct sockaddr_in server_address, client_address;
   size_t client_address_length = sizeof(client_address);
   int client_socket_number;
-
+  pid_t pid;
   *socket_number = socket(PF_INET, SOCK_STREAM, 0);
   if (*socket_number == -1) {
     perror("Failed to create a new socket");
@@ -268,12 +332,28 @@ void serve_forever(int *socket_number, void (*request_handler)(int)) {
         client_address.sin_port);
      //Read in and parse the HTTP request
     // TODO: Change me?
-    request_handler(client_socket_number);
-    close(client_socket_number);
+    
+    pid = fork();
+    if (pid > 0) {
+      close(client_socket_number);
+    } else if (pid == 0) {
+      signal(SIGINT, SIG_DFL); // Un-register signal handler (only parent should have it)
+      close(*socket_number);
+      request_handler(client_socket_number);
+      close(client_socket_number);
+      exit(EXIT_SUCCESS);
+    } else {
+      fprintf(stderr, "Failed to fork child: error %d: %s\n", errno, strerror(errno));
+      exit(errno);
+    }
 
-    printf("Accepted connection from %s on port %d\n",
+
+   // request_handler(client_socket_number);
+   // close(client_socket_number);
+
+    /*printf("Accepted connection from %s on port %d\n",
         inet_ntoa(client_address.sin_addr),
-        client_address.sin_port);
+        client_address.sin_port); ORIGINAL CODE*/
   }
 
   shutdown(*socket_number, SHUT_RDWR);
