@@ -103,7 +103,12 @@ void handle_files_request(int fd) {
 //When you press the button, you're requesting my_documents, which is a directory that does not contain index.html, so we should return a list of files 
 
   
- char* file_path= strcat(server_files_directory, request->path); //concatenate path to server_files_directory
+ char file_path[1024];
+ 
+
+
+ strcpy(file_path, server_files_directory);  
+ strcat(file_path, request->path); //concatenate path to server_files_directory
   printf("File path is %s\n", file_path);
   
  if(is_Directory(file_path)){   
@@ -123,7 +128,7 @@ void handle_files_request(int fd) {
                 (void) printf("found %s\n", "index.html");
                 (void) closedir(dir);
                 a=1;
-                file_path = strcat(file_path,"/index.html");
+                strcat(file_path,"/index.html");
                 write_from_file_to_fd(fd,file_path);
              }else{  //if index.html is not in the directory
               if (strcmp(dp->d_name, ".") != 0 && strcmp(dp->d_name, "..")!=0 ){
@@ -136,8 +141,8 @@ void handle_files_request(int fd) {
              }
     }} while (dp != NULL);
     if(a==0){
-     http_send_string(fd,"<a href=\"");
-     http_send_string(fd,file_path);
+     http_send_string(fd,"<a href=\"..");
+    //.. means the parent of the current working directory 
      http_send_string(fd, "\">"); 
      http_send_string(fd,"Parent directory");
      http_send_string(fd, "</a>""</br>");
@@ -154,11 +159,12 @@ void handle_files_request(int fd) {
       "<hr>");
        char *file_extension = strrchr(file_path, '.');
       if (strcmp(file_extension, ".jpg") == 0 || strcmp(file_extension, ".jpeg") == 0) {
-
-       http_send_string(fd, "<img src=");
+        http_send_string(fd, "<style>""img {width: 100%;}" "</style>" );
+       http_send_string(fd, "<body>");
+       http_send_string(fd, "<img src=../");
        http_send_string(fd,file_path);
-       http_send_string(fd,">");
-    
+       http_send_string(fd,"alt=\"Test\"" "style=\"width:256px;height:256px;\"" ">");
+     http_send_string(fd, "</body>");
      }else{
       
      http_send_string(fd,"<object data=\"");
@@ -169,14 +175,7 @@ void handle_files_request(int fd) {
 
      
   }
-
-
-
-
-      
       http_send_string(fd,"</center>");
-       
-       
 }else{  
     http_start_response(fd, 404);
     http_send_header(fd, "Content-Type", "text/html");
@@ -266,12 +265,40 @@ void handle_proxy_request(int fd) {
 }
 
 
+void* thread_loop(void *f){
+    void (*request_handler)(int) = f;
+    int client_fd;
+    printf("Thread created\n");
+
+    while(1){
+        client_fd = wq_pop(&work_queue); //thread created will wait on the condition variable!
+        request_handler(client_fd);
+        printf("I'm back %lu!\n", (unsigned long)pthread_self());
+        close(client_fd);
+        printf("closed fd %d\n", client_fd);
+    }
+
+    return NULL;
+}
+
+
+
 void init_thread_pool(int num_threads, void (*request_handler)(int)) {
   /*
    * TODO: Part of your solution for Task 2 goes here!
    */
-}
+   int i;
+   pthread_t thread;
 
+  
+     // Initialize num threads
+   for(i=0; i<num_threads; i++){
+      if(pthread_create(&thread, NULL, thread_loop, request_handler)!=0){
+        fprintf(stderr, "Couldn't initialize thread %d, Error", i);
+    }
+
+   }  
+}
 /*
  * Opens a TCP stream socket on all interfaces with port number PORTNO. Saves
  * the fd number of the server socket in *socket_number. For each accepted
@@ -282,7 +309,10 @@ void serve_forever(int *socket_number, void (*request_handler)(int)) {
   struct sockaddr_in server_address, client_address;
   size_t client_address_length = sizeof(client_address);
   int client_socket_number;
-  pid_t pid;
+ 
+
+
+//  pid_t pid;
   *socket_number = socket(PF_INET, SOCK_STREAM, 0);
   if (*socket_number == -1) {
     perror("Failed to create a new socket");
@@ -333,7 +363,18 @@ void serve_forever(int *socket_number, void (*request_handler)(int)) {
      //Read in and parse the HTTP request
     // TODO: Change me?
     
-    pid = fork();
+    if(num_threads>0){
+    wq_push(&work_queue, client_socket_number);
+    //will signal thread waiting on the condition variable 
+      
+
+    }else{
+
+    request_handler(client_socket_number);
+    close(client_socket_number);
+
+    }
+ /*   pid = fork();
     if (pid > 0) {
       close(client_socket_number);
     } else if (pid == 0) {
@@ -346,10 +387,8 @@ void serve_forever(int *socket_number, void (*request_handler)(int)) {
       fprintf(stderr, "Failed to fork child: error %d: %s\n", errno, strerror(errno));
       exit(errno);
     }
+*/
 
-
-   // request_handler(client_socket_number);
-   // close(client_socket_number);
 
     /*printf("Accepted connection from %s on port %d\n",
         inet_ntoa(client_address.sin_addr),
@@ -379,6 +418,7 @@ void exit_with_usage() {
 
 int main(int argc, char **argv) {
   signal(SIGINT, signal_callback_handler);
+  wq_init(&work_queue);
 
   /* Default settings */
   server_port = 8000;
@@ -425,6 +465,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Expected positive integer after --num-threads\n");
         exit_with_usage();
       }
+
     } else if (strcmp("--help", argv[i]) == 0) {
       exit_with_usage();
     } else {
