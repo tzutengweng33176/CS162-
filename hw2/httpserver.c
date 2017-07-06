@@ -46,6 +46,8 @@ int server_proxy_port;
  *   4) Send a 404 Not Found response.
  */
 
+void *relay_thread_loop(void *input);
+
 int is_File(char *path){
 	struct stat path_stat;
 	stat(path,&path_stat);
@@ -205,27 +207,21 @@ void handle_files_request(int fd) {
  */
 void handle_proxy_request(int fd) {
 
+    pthread_t forward_relay;
+    pthread_t backward_relay;
+    
+    int forward_args[2];
+    int backward_args[2];
+
   /*
   * The code below does a DNS lookup of server_proxy_hostname and 
   * opens a connection to it. Please do not modify.
   */
 
-// struct sockaddr_in {
-//               sa_family_t    sin_family; /* address family: AF_INET */
-//               in_port_t      sin_port;   /* port in network byte order */
-//               struct in_addr sin_addr;   /* internet address */
- //          };
-
-           /* Internet address. */
-//           struct in_addr {
-//               uint32_t       s_addr;     /* address in network byte order *///          };
-
   struct sockaddr_in target_address;
   memset(&target_address, 0, sizeof(target_address));
   target_address.sin_family = AF_INET;
   target_address.sin_port = htons(server_proxy_port);
-//The htons() function converts the unsigned short integer hostshort from host byte order to network byte order.
-
 
   struct hostent *target_dns_entry = gethostbyname2(server_proxy_hostname, AF_INET);
 
@@ -259,9 +255,42 @@ void handle_proxy_request(int fd) {
 
   }
 
+  forward_args[0] =fd;
+  forward_args[1] = client_socket_fd;
+
+  backward_args[0]= client_socket_fd;
+  backward_args[1]=fd;
+
+
+    pthread_create(&forward_relay, NULL, relay_thread_loop, (void *)forward_args);
+    pthread_create(&backward_relay, NULL, relay_thread_loop, (void *)backward_args);
+
+    pthread_join(forward_relay, NULL);  
+
+
   /* 
   * TODO: Your solution for task 3 belongs here! 
   */
+
+
+
+}
+
+
+void *relay_thread_loop(void *input){
+    
+    int *fds = (int *)input;
+    int in = fds[0];
+    int out = fds[1];
+    char buffer[1024];
+    int length;
+
+    while((length = read(in, buffer, sizeof(buffer) - 1)) > 0){
+        printf("%d to %d\n", in, out);
+        printf("%s\n\n\n", buffer);
+        write(out, buffer, length);
+    }
+    return NULL;
 }
 
 
